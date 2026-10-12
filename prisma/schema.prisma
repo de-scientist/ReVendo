@@ -7,11 +7,189 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-// Phase 1 only: schema bootstrap. Domain tables are introduced with reviewed migrations in later phases.
+// ---------------------------------------------------------------------------
+// Phase 1 foundation schema (staged).
+// Includes only models with defensible Phase 1 value: identity placeholders,
+// catalog taxonomy/listing shells, session + audit + idempotency infrastructure.
+// Future phases add: addresses, carts, orders, payments, commissions, earnings,
+// ledger, payouts, refunds, disputes, reviews, wishlists. See docs/database.md.
+// ---------------------------------------------------------------------------
+// Conventions:
+// - IDs: cuid() strings (opaque, non-enumerable). Financial/audit rows are never reused.
+// - Money: BIGINT minor units (KES cents). KSh 1,250.00 = 125000. See packages/contracts.
+// - Time: DateTime @default(now()) — application treats all timestamps as UTC.
+// - Deletes: RESTRICT on catalog/financial history; CASCADE only for
+//   session revocation scope and product images of an (archived, never hard-sold) product.
+//   Products are ARCHIVED via status, never hard-deleted after sale.
+// - MySQL 8 only: no PostgreSQL partial indexes / exclusion constraints.
+// ---------------------------------------------------------------------------
+
+enum UserRole {
+  USER
+  ADMIN
+}
+
+enum SellerStatus {
+  PENDING
+  APPROVED
+  SUSPENDED
+}
+
+enum ProductCondition {
+  NEW
+  LIKE_NEW
+  GOOD
+  FAIR
+}
+
+enum ProductStatus {
+  DRAFT
+  PENDING_MODERATION
+  PUBLISHED
+  SOLD
+  REJECTED
+  ARCHIVED
+}
+
+model User {
+  id              String    @id @default(cuid()) @db.VarChar(30)
+  email           String    @unique @db.VarChar(255)
+  phone           String?   @unique @db.VarChar(20)
+  passwordHash    String    @db.VarChar(255)
+  displayName     String    @db.VarChar(100)
+  role            UserRole  @default(USER)
+  emailVerifiedAt DateTime? @db.DateTime(3)
+  phoneVerifiedAt DateTime? @db.DateTime(3)
+  createdAt       DateTime  @default(now()) @db.DateTime(3)
+  updatedAt       DateTime  @updatedAt @db.DateTime(3)
+
+  sellerProfile SellerProfile?
+  sessions      Session[]
+  auditLogs     AuditLog[]     @relation("AuditActor")
+
+  @@index([role, createdAt])
+}
+
+model SellerProfile {
+  id        String       @id @default(cuid()) @db.VarChar(30)
+  userId    String       @unique @db.VarChar(30)
+  user      User         @relation(fields: [userId], references: [id], onDelete: Restrict)
+  shopName  String       @db.VarChar(120)
+  bio       String?      @db.Text
+  status    SellerStatus @default(PENDING)
+  createdAt DateTime     @default(now()) @db.DateTime(3)
+  updatedAt DateTime     @updatedAt @db.DateTime(3)
+
+  products Product[]
+
+  @@index([status, createdAt])
+}
+
+model Category {
+  id        String    @id @default(cuid()) @db.VarChar(30)
+  slug      String    @unique @db.VarChar(120)
+  name      String    @db.VarChar(120)
+  parentId  String?   @db.VarChar(30)
+  parent    Category? @relation("CategoryTree", fields: [parentId], references: [id], onDelete: Restrict)
+  children  Category[] @relation("CategoryTree")
+  sortOrder Int       @default(0)
+  createdAt DateTime  @default(now()) @db.DateTime(3)
+  updatedAt DateTime  @updatedAt @db.DateTime(3)
+
+  products Product[]
+
+  @@index([parentId, sortOrder])
+}
+
+model Product {
+  id          String           @id @default(cuid()) @db.VarChar(30)
+  sellerId    String           @db.VarChar(30)
+  seller      SellerProfile    @relation(fields: [sellerId], references: [id], onDelete: Restrict)
+  categoryId  String           @db.VarChar(30)
+  category    Category         @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  title       String           @db.VarChar(160)
+  description String           @db.MediumText
+  condition   ProductCondition
+  priceMinor  BigInt           @db.BigInt
+  currency    String           @default("KES") @db.Char(3)
+  stock       Int              @default(1) @db.UnsignedInt
+  status      ProductStatus    @default(DRAFT)
+  location    String           @db.VarChar(120)
+  createdAt   DateTime         @default(now()) @db.DateTime(3)
+  updatedAt   DateTime         @updatedAt @db.DateTime(3)
+
+  images ProductImage[]
+
+  @@index([status, categoryId, createdAt])
+  @@index([sellerId, status])
+  @@index([status, priceMinor])
+  @@fulltext([title, description])
+}
+
+model ProductImage {
+  id        String   @id @default(cuid()) @db.VarChar(30)
+  productId String   @db.VarChar(30)
+  product   Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  publicId  String   @db.VarChar(255)
+  url       String   @db.VarChar(1024)
+  position  Int      @db.UnsignedInt
+  isPrimary Boolean  @default(false)
+  createdAt DateTime @default(now()) @db.DateTime(3)
+
+  @@unique([productId, position])
+  @@index([productId])
+}
+
+model Session {
+  id         String    @id @default(cuid()) @db.VarChar(30)
+  userId     String    @db.VarChar(30)
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash  String    @unique @db.VarChar(128)
+  ip         String?   @db.VarChar(64)
+  userAgent  String?   @db.VarChar(512)
+  expiresAt  DateTime  @db.DateTime(3)
+  revokedAt  DateTime? @db.DateTime(3)
+  createdAt  DateTime  @default(now()) @db.DateTime(3)
+
+  @@index([userId, expiresAt])
+  @@index([expiresAt])
+}
+
+model AuditLog {
+  id         String   @id @default(cuid()) @db.VarChar(30)
+  actorId    String?  @db.VarChar(30)
+  actor      User?    @relation("AuditActor", fields: [actorId], references: [id], onDelete: SetNull)
+  action     String   @db.VarChar(100)
+  entityType String   @db.VarChar(100)
+  entityId   String   @db.VarChar(100)
+  before     Json?
+  after      Json?
+  ip         String?  @db.VarChar(64)
+  userAgent  String?  @db.VarChar(512)
+  createdAt  DateTime @default(now()) @db.DateTime(3)
+
+  @@index([entityType, entityId])
+  @@index([actorId, createdAt])
+  @@index([createdAt])
+}
+
+model IdempotencyKey {
+  key        String   @id @db.VarChar(100)
+  ownerType  String   @db.VarChar(50)
+  ownerId    String?  @db.VarChar(100)
+  statusCode Int?     @db.Int
+  response   Json?
+  createdAt  DateTime @default(now()) @db.DateTime(3)
+  expiresAt  DateTime @db.DateTime(3)
+
+  @@index([expiresAt])
+  @@index([ownerType, ownerId])
+}
+
 model SystemSetting {
   id        String   @id @default(cuid()) @db.VarChar(30)
   key       String   @unique @db.VarChar(100)
   value     String   @db.Text
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  createdAt DateTime @default(now()) @db.DateTime(3)
+  updatedAt DateTime @updatedAt @db.DateTime(3)
 }
