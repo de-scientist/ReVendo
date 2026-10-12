@@ -30,4 +30,16 @@ reviews, admin, or hosting claims.
 
 | Date (UTC) | Command | Result |
 |---|---|---|
-| | | |
+| 2026-10-12 | `npm install` | Passed — 694+ packages, lockfile written; 30 vulns noted (21 moderate, 9 high), incl. Next/postcss advisories |
+| 2026-10-12 | `npm run typecheck` | Passed — api + web + contracts |
+| 2026-10-12 | `npm run lint` | Passed — api + web + contracts (after fixing api/contracts flat config and web FlatCompat) |
+| 2026-10-12 | `npm run test` | Passed — api 11/11, contracts 36/36 (47 total, real assertions) |
+| 2026-10-12 | `npm run db:generate` | Passed — Prisma Client v6.19.3 generated |
+| 2026-10-12 | `npx prisma validate` | Passed — schema valid |
+| 2026-10-12 | `prisma migrate diff --from-empty --to-schema-datamodel` | Passed — reviewed 13.9 KB SQL, stored at `prisma/migrations/20251012000000_phase1_foundation/migration.sql` |
+| 2026-10-12 | `npm run build` (api + web) | Passed — `dist/main.js` + 4 static Next routes; SWC-native warnings only (AppControl fallback, non-blocking) |
+| 2026-10-12 | API smoke `GET /api/v1/health` | Passed — `{"status":"ok","service":"revendo-api","version":"0.1.0","timestamp":"..."}` |
+| 2026-10-12 | Web smoke `GET /` (prod `next start`) | Passed — title + ReVendo brand + tagline rendered |
+| 2026-10-12 | `npm run db:migrate` vs live MySQL | Not verified — Docker unavailable in build env; no disposable MySQL reachable |
+| 2026-10-12 | `docker compose up -d mysql redis` | Not verified — Docker CLI not installed in build env |
+| 2026-10-12 | Playwright e2e | Not verified — deferred by design (Phase 1); no browser suite claimed |
