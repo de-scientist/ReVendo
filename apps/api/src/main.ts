@@ -3,14 +3,22 @@ import { Logger, ValidationPipe } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import helmet from 'helmet';
 import { AppModule } from './app.module';
-import { loadEnv, redactedEnv, resolveCorsOrigins } from './config/env';
+import { loadEnv, resolveCorsOrigins } from './config/env';
 import { AllExceptionsFilter } from './common/filters/http-exception.filter';
 
 async function bootstrap() {
   const logger = new Logger('Bootstrap');
   const env = loadEnv();
   logger.log(`Starting revendo-api (NODE_ENV=${env.NODE_ENV})`);
-  logger.debug(`Non-secret config: ${JSON.stringify(redactedEnv({ ...process.env, SESSION_SECRET: undefined }))}`);
+  logger.debug(
+    `Config: ${JSON.stringify({
+      port: env.API_PORT,
+      webOrigin: env.WEB_ORIGIN,
+      cors: resolveCorsOrigins(env),
+      logLevel: env.LOG_LEVEL,
+      payments: { enabled: env.PAYMENTS_ENABLED, live: env.PAYMENTS_LIVE_ENABLED, payouts: env.PAYOUTS_ENABLED },
+    })}`,
+  );
 
   const app = await NestFactory.create(AppModule, { bufferLogs: true, logger: ['log', 'error', 'warn'] });
   app.setGlobalPrefix('api/v1');
